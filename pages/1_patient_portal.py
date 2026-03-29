@@ -1,19 +1,12 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-import json, ast
-from pathlib import Path
+import ast
 
 st.set_page_config(page_title="Patient Portal", page_icon="🧑", layout="wide")
-
+from data_loader import get_data
 @st.cache_data
 def load_data():
-    base = Path("data")
-    patients = pd.read_csv(base / "scored_patients.csv")
-    with open(base / "habit_recommendations.json") as f:
-        habits = {r["patient_id"]: r for r in json.load(f)}
-    return patients, habits
+    return get_data()
 
 patients, habits = load_data()
 
@@ -35,7 +28,6 @@ tier_icon   = tier_colors.get(patient["risk_tier"], "⚪")
 
 st.title("Your Health Dashboard")
 st.caption(f"Patient {selected_id} · Age {int(patient['age'])} · {tier_icon} {patient['risk_tier']} Risk")
-
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Overall Risk Score",   f"{patient['composite_risk']:.1f}/100")
 col2.metric("CVD Risk (10yr)",      f"{patient['risk_cvd_10yr_adj']:.1f}%")
