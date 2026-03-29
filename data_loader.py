@@ -37,7 +37,7 @@ def get_data():
     sdoh = ((pov<1.3).astype(int)+np.isin(food_s,[3,4]).astype(int)+(insur==2).astype(int))
     mult = pd.Series(sdoh).map({0:1.0,1:1.08,2:1.18,3:1.32}).values
     cvd = np.random.uniform(0,100,N).round(1)
-    t2d = np.random.choice([1,4,17,33,50],N,p=[0.50,0.38,0.09,0.03,0.004]).astype(float)
+    t2d = np.random.choice([1,4,17,33,50],N,p=[0.50,0.38,0.09,0.03,0.00]).astype(float)
     resp = np.random.uniform(0,60,N).round(1)
     cancer = (age*0.4+pack_yrs*0.5+np.random.normal(0,8,N)).clip(0,100).round(1)
     comp = (cvd*0.35+t2d*0.25+cancer*0.25+resp*0.15).round(1)
