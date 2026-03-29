@@ -1,0 +1,175 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import json, ast
+from pathlib import Path
+
+st.set_page_config(page_title="Patient Portal", page_icon="🧑", layout="wide")
+
+@st.cache_data
+def load_data():
+    base = Path("data")
+    patients = pd.read_csv(base / "scored_patients.csv")
+    with open(base / "habit_recommendations.json") as f:
+        habits = {r["patient_id"]: r for r in json.load(f)}
+    return patients, habits
+
+patients, habits = load_data()
+
+st.sidebar.title("🧑 Patient Portal")
+habit_patient_ids = list(habits.keys())
+scored_with_habits = patients[patients["patient_id"].isin(habit_patient_ids)]
+
+selected_id = st.sidebar.selectbox(
+    "Select patient",
+    options=scored_with_habits["patient_id"].tolist(),
+    format_func=lambda x: f"Patient {x} — {patients[patients['patient_id']==x]['risk_tier'].values[0]} risk"
+)
+
+patient    = patients[patients["patient_id"] == selected_id].iloc[0]
+habit_data = habits.get(selected_id, {})
+
+tier_colors = {"Low": "🟢", "Moderate": "🟡", "High": "🟠", "Very High": "🔴"}
+tier_icon   = tier_colors.get(patient["risk_tier"], "⚪")
+
+st.title("Your Health Dashboard")
+st.caption(f"Patient {selected_id} · Age {int(patient['age'])} · {tier_icon} {patient['risk_tier']} Risk")
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Overall Risk Score",   f"{patient['composite_risk']:.1f}/100")
+col2.metric("CVD Risk (10yr)",      f"{patient['risk_cvd_10yr_adj']:.1f}%")
+col3.metric("Diabetes Risk (10yr)", f"{patient['risk_t2d_10yr_adj']:.1f}%")
+col4.metric("Cancer Risk",          f"{patient['risk_cancer_adj']:.1f}/100")
+
+st.divider()
+
+col_left, col_right = st.columns([1, 1])
+
+with col_left:
+    st.subheader("Overall risk score")
+    score = patient["composite_risk"]
+    color = "#22c55e" if score < 10 else "#eab308" if score < 25 else "#f97316" if score < 45 else "#ef4444"
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number", value=score,
+        domain={"x": [0,1], "y": [0,1]},
+        title={"text": patient["risk_tier"], "font": {"size": 16}},
+        gauge={
+            "axis":  {"range": [0, 100], "tickwidth": 1},
+            "bar":   {"color": color},
+            "steps": [
+                {"range": [0,  10], "color": "#dcfce7"},
+                {"range": [10, 25], "color": "#fef9c3"},
+                {"range": [25, 45], "color": "#ffedd5"},
+                {"range": [45,100], "color": "#fee2e2"},
+            ],
+            "threshold": {"line": {"color": "red", "width": 2}, "thickness": 0.75, "value": score},
+        },
+    ))
+    fig_gauge.update_layout(height=280, margin=dict(t=40, b=0, l=20, r=20))
+    st.plotly_chart(fig_gauge, use_container_width=True)
+
+with col_right:
+    st.subheader("Risk by disease")
+    diseases = {
+        "Cardiovascular":  patient["risk_cvd_10yr_adj"],
+        "Type 2 Diabetes": patient["risk_t2d_10yr_adj"],
+        "Cancer":          patient["risk_cancer_adj"],
+        "Respiratory":     patient["risk_respiratory_adj"],
+    }
+    fig_bar = go.Figure(go.Bar(
+        x=list(diseases.values()), y=list(diseases.keys()),
+        orientation="h",
+        marker_color=["#ef4444","#f97316","#8b5cf6","#06b6d4"],
+        text=[f"{v:.1f}" for v in diseases.values()],
+        textposition="outside",
+    ))
+    fig_bar.update_layout(height=280, xaxis=dict(range=[0,100], title="Risk score"),
+                          margin=dict(t=20, b=20, l=20, r=40), showlegend=False)
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+st.divider()
+st.subheader("Your top risk factors")
+
+FEATURE_LABELS = {
+    "age":"Age-related risk", "is_female":"Sex-based risk profile",
+    "bmi":"Elevated BMI", "waist_cm":"Abdominal obesity",
+    "sbp":"High blood pressure", "tc_hdl_ratio":"Unfavorable cholesterol ratio",
+    "fasting_glucose":"Elevated blood sugar", "hba1c":"Elevated HbA1c",
+    "is_smoker":"Current smoking", "pack_years":"Smoking history",
+    "fev1_fvc":"Reduced lung function", "sdoh_burden":"Social & economic barriers",
+    "hsCRP":"Elevated inflammation", "vigorous_rec_min":"Low physical activity",
+    "past_year_drinks":"Alcohol consumption",
+}
+
+try:
+    drivers = ast.literal_eval(patient["top_risk_drivers"]) if isinstance(patient["top_risk_drivers"], str) else patient["top_risk_drivers"]
+except:
+    drivers = []
+
+driver_cols  = st.columns(3)
+driver_icons = ["🔴", "🟠", "🟡"]
+for i, driver in enumerate(drivers[:3]):
+    label = FEATURE_LABELS.get(driver, driver.replace("_"," ").title())
+    with driver_cols[i]:
+        st.markdown(f"""
+        <div style='padding:16px;border-radius:12px;border:1px solid #e5e7eb;text-align:center'>
+            <div style='font-size:28px'>{driver_icons[i]}</div>
+            <div style='font-weight:600;margin-top:8px;font-size:14px'>{label}</div>
+            <div style='color:#6b7280;font-size:12px;margin-top:4px'>Risk driver #{i+1}</div>
+        </div>""", unsafe_allow_html=True)
+
+st.divider()
+st.subheader("Your personalized daily habit plan")
+st.caption("Generated by AI based on your personal risk profile")
+
+if habit_data and "habits" in habit_data:
+    difficulty_colors = {"Easy": "#22c55e", "Medium": "#f97316", "Hard": "#ef4444"}
+    for i, habit in enumerate(habit_data["habits"], 1):
+        diff       = habit.get("difficulty", "Easy")
+        diff_color = difficulty_colors.get(diff, "#888")
+        mins       = habit.get("daily_time_minutes", 0)
+        with st.expander(f"Habit {i}: {habit.get('habit', 'Daily habit')}", expanded=True):
+            h1, h2 = st.columns([3,1])
+            with h1:
+                st.markdown(f"**What to do:** {habit.get('description','')}")
+                st.markdown(f"**Why it helps:** {habit.get('expected_impact','')}")
+                st.markdown(f"**Targets:** {habit.get('target_risk','')}")
+            with h2:
+                st.markdown(f"<div style='text-align:center;padding:12px;border-radius:8px;background:#f9fafb'>"
+                            f"<div style='color:{diff_color};font-weight:600;font-size:16px'>{diff}</div>"
+                            f"<div style='color:#6b7280;font-size:12px'>difficulty</div>"
+                            f"<div style='font-weight:600;font-size:20px;margin-top:8px'>{mins}</div>"
+                            f"<div style='color:#6b7280;font-size:12px'>min/day</div>"
+                            f"</div>", unsafe_allow_html=True)
+else:
+    st.info("No habit plan generated for this patient yet.")
+
+st.divider()
+st.subheader("Your progress streak")
+st.caption("Mark habits complete each day to build your streak")
+
+if "streaks" not in st.session_state:
+    st.session_state.streaks = {i: 0 for i in range(1, 4)}
+if "points" not in st.session_state:
+    st.session_state.points = 0
+
+g1, g2, g3, g4 = st.columns(4)
+with g4:
+    st.metric("Total points", f"🏆 {st.session_state.points}")
+
+if habit_data and "habits" in habit_data:
+    for i, habit in enumerate(habit_data["habits"][:3], 1):
+        col = [g1, g2, g3][i-1]
+        with col:
+            streak = st.session_state.streaks[i]
+            st.markdown(f"**Habit {i}** — 🔥 {streak} day streak")
+            if st.button(f"✅ Mark complete", key=f"habit_{i}_{selected_id}"):
+                st.session_state.streaks[i] += 1
+                st.session_state.points     += 10
+                st.success(f"+10 points! Streak: {st.session_state.streaks[i]} days 🔥")
+                st.rerun()
+
+sdoh = int(patient["sdoh_burden"])
+if sdoh >= 2:
+    st.info("💙 **Community support available** — Based on your profile, you may qualify for free health programs, food assistance, or community health worker support in your area.")
